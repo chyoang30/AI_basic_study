@@ -106,3 +106,8 @@ while err > 3:
 visualize(pred_for_mse)
 #답안지 제출
 best_cf=cf
+
+pred=func(best_cf)
+err = mse(pred)
+print(err,"만큼 오차가 발생했습니다.")
+visualize(pred)
