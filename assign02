@@ -1,0 +1,108 @@
+from google.colab import drive
+drive.mount('/content/drive/')
+
+
+import IPython.display as ipd
+import librosa
+import librosa.display
+import numpy as np
+import matplotlib.pyplot as plt
+import copy
+
+filename = "/content/drive/MyDrive/AI_basic/assign02/sound.wav" # google colab 용
+# filename = "sound.wav"
+data,sample_rate = librosa.load(filename)
+
+def func(cf) :
+    time = np.linspace(0, 0.5, len(data))
+    sound = np.sum(cf[0]*np.sin(np.array( [i*time for i in cf[1:]] )), axis=0)
+    return sound
+def mse(pred):
+    error=np.abs(data-pred)
+    return np.mean(error)*1500
+
+def visualize(pred,animation=False):
+  plt.plot(pred,color="red",label="pred",linewidth="1.0")
+  plt.plot(data,color="green",label="gt",linewidth="1.0")
+  plt.legend()
+  plt.show()
+  if animation:
+    ipd.clear_output(wait=True)
+
+print('data :', data[:5])
+print('data size : ', len(data))
+ipd.Audio(filename)
+
+def error_scoring(pred):
+    return mse(pred)
+
+
+init_cf = np.array([800.0, 800.0, 1000.0, 1200.0, 1400.0])
+
+cnt=0
+cf = copy.deepcopy(init_cf)
+test_cf = copy.deepcopy(init_cf)
+
+#오차 계산
+err = error_scoring(func(cf))
+
+step_size = 0
+
+while err > 3:
+  if cnt > 1000:
+    break
+
+  # 에러에 따라 step_size 조정ㅋㅋㅋ
+  if err > 50000:
+      step_size = 5.0  # 오차가 크면 큰 조정
+  elif err > 25000:
+      step_size = 1.0
+  elif err > 10000:
+      step_size = 0.5
+  elif err > 5000:
+      astep_size = 0.25
+  elif err > 2500:
+      step_size = 0.1
+  elif err > 500:
+      step_size = 0.01
+  elif err >300:
+      step_size = 0.001
+  else:
+      step_size = 0.0001  # 오차가 작을 때 작은 조정
+
+  #탐침 파트
+  for i in range(1, 5):
+
+    test_cf[i] = test_cf[i]+10
+    diff = error_scoring(func(test_cf))-error_scoring(func(cf))
+    if diff<=0:
+      cf[i] = cf[i]+10
+    else:
+      cf[i] = cf[i]-10
+
+    test_cf[:]=cf
+
+
+
+  test_cf[0] = test_cf[0]+step_size
+  diff = error_scoring(func(test_cf))-error_scoring(func(cf))
+  if diff<=0:
+    cf[0] = cf[0]+step_size
+  else:
+    cf[0] = cf[0]-step_size
+
+  test_cf[:]=cf
+
+  err=mse(func(cf))
+
+
+  #Visualization Part
+  if cnt%20 ==0:
+    pred_for_mse=func(cf)
+    plt.title("err:"+str(err))
+    visualize(pred_for_mse,True)
+
+  cnt+=1
+visualize(pred_for_mse)
+#답안지 제출
+best_cf=cf
