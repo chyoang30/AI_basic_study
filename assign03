@@ -1,0 +1,140 @@
+from google.colab import drive
+drive.mount('/content/drive')
+
+#data 압축풀기
+!unzip -qq "/content/drive/MyDrive/AI_basic/assign03/data.zip" -d "/content/drive/MyDrive/AI_basic/assign03/data"
+
+#필요 라이브러리 설치
+!pip install numpy opencv-python
+
+import os #파일 입출력을 위한 라이브러리
+import numpy as np #이미지를 세부 컨트롤 하기 위해 필요한 라이브러리
+import cv2 as cv #이미지를 다루기 위한 라이브러리
+from google.colab.patches import cv2_imshow #시각화
+import scipy.io
+import random
+import copy
+
+def read_imgs(src):
+  file_names=os.listdir(src)
+  img_list=[]
+  for img_name in file_names:
+    src_file=os.path.join(src,img_name)
+    img= cv.imread(src_file)
+    img =cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    # img= cv.resize(img,(400,400))
+    # img= cv.cvtColor(img, cv.COLOR_BGR2RGB)
+
+    img_list.append(img)
+  return img_list
+
+def read_mats(src):
+  file_names=os.listdir(src)
+  mat_list=[]
+  for mat_name in file_names:
+    src_file=os.path.join(src,mat_name)
+    mat_dict = scipy.io.loadmat(src_file)
+    gt= mat_dict['groundTruth']
+    mat_list.append(gt[0][4][0][0][1]*255)
+  return mat_list
+
+basic_path= "/content/drive/MyDrive/AI_basic/assign03/data"
+
+img_list=read_imgs(os.path.join(basic_path,'imgs'))
+mat_list=read_mats(os.path.join(basic_path,'gts'))
+
+clone_img_list= copy.deepcopy(img_list)
+clone_mat_list= copy.deepcopy(mat_list)
+for i in range(len(mat_list)):
+  # cv2_imshow(img_list[i])
+  img_sample=clone_img_list[i]
+  gt_sample=clone_mat_list[i]
+  img_sample[gt_sample!=0]=255
+  cv2_imshow(img_sample)
+
+def test(pred,gt):
+  fp=((pred-gt)>0).sum()
+  fn=((pred-gt)<0).sum()
+  tp=((pred==gt) & gt>0).sum()
+  precision=tp/(fp+tp+ 1e-3)
+  recall=tp/(fn+tp+ 1e-3)
+  f1_score=2*(precision*recall)/(precision+recall+ 1e-3)
+
+  return f1_score
+
+
+def normalize(x,norm):
+  return x/(255*norm)
+def edge_detect(img):
+  # 가우시안 블러 추가
+  img = cv.GaussianBlur(img, (5, 5), 0)
+
+  #erode&dilate
+  # 커널 정의
+  kernel = np.ones((5, 5), np.uint8)
+  img = cv.erode(img, kernel, iterations=1)
+  img = cv.dilate(img, kernel, iterations=1)
+
+  #filter 조정(W,H는 홀수가 되게 지정)
+  filter1=np.array([[3,1,0,-1,-3],  #수평 윤곽선 필터
+                   [3,1,0,-1,-3],
+                   [3,1,0,-1,-3],
+                   [3,1,0,-1,-3],
+                   [3,1,0,-1,-3],
+                  ])
+  filter2=np.array([[3,3,3,3,3],  #수직 윤곽선 필터
+                    [1,1,1,1,1],
+                    [0,0,0,0,0],
+                    [-1,-1,-1,-1,-1],
+                    [-3,-3,-3,-3,-3],
+                  ])
+  #threshold
+  thr=0.1  #임계값. 0.1 이상아면 윤곽선임
+
+  ###############이 파트는 이해없이 손대지 말 것 ##############
+  H,W=img.shape
+  edged_img= copy.deepcopy(img)
+  offset_size=filter2.shape[0]//2
+  padded_canvas= np.zeros((H+2*offset_size,W+2*offset_size))
+  padded_canvas[offset_size:H+offset_size,offset_size:W+offset_size]=img
+  ########################################################################
+  #이미지를 패딩하는 부분, 필터의 크기에 따라 이미지의 외곽에 여유공간 추가
+
+  for w in range(W): #W는 수평 넓이, H는 수직 높이로 이해했다.
+    for h in range(H):
+      cropped_img=padded_canvas[h:h+filter2.shape[1], w:w+filter2.shape[0]]
+      #crop된 이미지 1D 벡터화
+      cropped_img_flatten=cropped_img.reshape(-1)
+      filter_flatten=filter2.reshape(-1)
+      ## 우리가 생각하는 윤곽 vector에 이미지 vector proejction
+      logit=np.dot(cropped_img_flatten, filter_flatten)
+      score=normalize(logit,filter2.shape[0]*filter2.shape[1]) #logit을 0~1사이로 정규화
+      if score>thr:
+        edged_img[h,w]=255 #정규화된 값이 임계값보다 크면 윤곽선
+      else:
+        edged_img[h,w]=0    #아니라면 배경으로 처리
+
+      #수평 필터를 사용한 윤곽선 탐지 코드 추가
+      cropped_img=padded_canvas[h:h+filter1.shape[0], w:w+filter1.shape[1]]
+      filter_flatten=filter1.reshape(-1)
+      logit=np.dot(cropped_img_flatten, filter_flatten)
+      score=normalize(logit,filter1.shape[0]*filter1.shape[1])
+      if score>thr:
+        edged_img[h,w]=255
+        #thr보다 작을시 0으로 처리하는 코드를 추가하면 filter2를 사용해 구별된 윤곽선이 사라질 수 있다.
+
+  return edged_img
+
+#시각화
+pred= edge_detect(img_list[1])
+gt=mat_list[1]
+#print(정답값)
+cv2_imshow(np.hstack([pred,gt,img_list[1]]))
+
+f1_score=[]
+for i in range(len(mat_list)):
+  pred_contour=edge_detect(img_list[i])
+  gt_contour=clone_mat_list[i]
+  f1_score.append(test(pred_contour,gt_contour))
+  total_score=np.round(np.array(f1_score).mean()*100,2)
+print("최종 점수는 100점 만점에", total_score,"점 입니다")
